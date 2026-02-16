@@ -43,9 +43,7 @@ app.use(express.static(path.join(__dirname, 'build')));
 
 // CORS middleware
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? 'your-production-url' 
-    : 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL,
   credentials: true
 }));
 
