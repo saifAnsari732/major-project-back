@@ -235,14 +235,16 @@ export const uploadPaper = async (req, res) => {
     console.log('✅ Paper created successfully:', paper._id);
     console.log('✅ Paper data:', JSON.stringify(paperData, null, 2));
 
-    // Update user's papers uploaded count
+    // Update user's papers uploaded count and award coins
     if (req.user && req.user.id) {
       try {
         const user = await User.findById(req.user.id);
         if (user) {
           user.papersUploaded += 1;
+          user.coins += 5; // Award 5 coins for uploading a paper
           await user.save();
           console.log('✅ User papers count updated');
+          console.log('✅ User awarded 5 coins for paper upload');
         }
       } catch (error) {
         console.error('⚠️ Failed to update user papers count:', error.message);
