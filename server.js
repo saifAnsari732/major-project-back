@@ -52,9 +52,10 @@ app.use(cors({
   credentials: true
 }));
 
+// console.log("Frontend URL:", process.env.FRONTEND_URL);
 
 
-
+ 
 // Cloudinary code
 cloudinary.config({ 
       cloud_name: "dc0eskzxx" ,
@@ -208,8 +209,8 @@ app.post("/api/compiler", async (req, res) => {
     python: 71,
     java: 62,
     c: 50
-  };
-
+  }; 
+ 
   try {
     const response = await axios.post(
       "https://ce.judge0.com/submissions?base64_encoded=false&wait=true",
