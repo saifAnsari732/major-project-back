@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.get('/', getAllBranches);
 router.get('/:id', getBranch);
-router.post('/', protect, authorize('admin'), createBranch);
+router.post('/', protect, createBranch);
 router.put('/:id', protect, authorize('admin'), updateBranch);
 router.delete('/:id', protect, authorize('admin'), deleteBranch);
 router.get('/:id/papers', getPapersByBranch);

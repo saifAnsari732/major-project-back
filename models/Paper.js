@@ -7,7 +7,6 @@ const paperSchema = new mongoose.Schema({
   },
   paperCode: {
     type: String,
-    required: true
   },
   course: {
     type: mongoose.Schema.Types.ObjectId,

@@ -97,10 +97,10 @@ export const uploadPaper = async (req, res) => {
     console.log('📝 Request body:', req.body);
     console.log('📁 Request files:', req.files);
     
-    const { name, paperCode, course, branch, subject, year, semester, uploadedBy } = req.body;
+    const { name, course, branch, subject,paperCode, year, semester, uploadedBy } = req.body;
     
     // Validate required fields
-    if (!name || !paperCode || !course || !subject || !year || !semester || !uploadedBy) {
+    if (!name || !course || !subject || !year || !semester || !uploadedBy || !branch || !paperCode) {
       return res.status(400).json({ 
         success: false,
         errors: "Missing required fields" 
@@ -166,8 +166,8 @@ export const uploadPaper = async (req, res) => {
       });
     }
 
-    console.log('✅ Cloudinary upload successful:', cloud_response.public_id);
-    console.log('✅ Cloudinary URL:', cloud_response.secure_url || cloud_response.url);
+    // console.log('✅ Cloudinary upload successful:', cloud_response.public_id);
+    // console.log('✅ Cloudinary URL:', cloud_response.secure_url || cloud_response.url);
 
     // Handle solve PDF file (optional)
     let solvePaperCloudResponse = null;
@@ -232,8 +232,8 @@ export const uploadPaper = async (req, res) => {
 
     const paper = await Paper.create(paperData);
 
-    console.log('✅ Paper created successfully:', paper._id);
-    console.log('✅ Paper data:', JSON.stringify(paperData, null, 2));
+    // console.log('✅ Paper created successfully:', paper._id);
+    // console.log('✅ Paper data:', JSON.stringify(paperData, null, 2));
 
     // Update user's papers uploaded count and award coins
     if (req.user && req.user.id) {
