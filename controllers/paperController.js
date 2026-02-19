@@ -2,7 +2,18 @@ import Paper from '../models/Paper.js';
 import Branch from '../models/Branch.js';
 import User from '../models/User.js';
 import { v2 as cloudinary } from 'cloudinary'
-// import SolvePaper from '../models/solvepaper.js';
+
+// Helper: upload a single file to cloudinary
+const uploadToCloudinary = async (file, folder) => {
+  const isPDF = file.mimetype === 'application/pdf';
+  const response = await cloudinary.uploader.upload(file.tempFilePath, {
+    resource_type: isPDF ? 'raw' : 'auto',
+    folder,
+    access_mode: 'public',
+    ...(isPDF && { flags: 'attachment' }),
+  });
+  return response;
+};
 
 // @desc    Get all papers
 // @route   GET /api/papers
@@ -13,29 +24,12 @@ export const getAllPapers = async (req, res) => {
     
     let query = {};
 
-    // Add filters if provided
-    if (paperCode) {
-      query.paperCode = { $regex: paperCode, $options: 'i' };
-    }
-    
-    if (name) {
-      query.name = { $regex: name, $options: 'i' };
-    }
+    if (paperCode) query.paperCode = { $regex: paperCode, $options: 'i' };
+    if (name) query.name = { $regex: name, $options: 'i' };
+    if (branch) query.branch = branch;
+    if (course) query.course = course;
 
-    if (branch) {
-      query.branch = branch;
-    }
-
-    if (course) {
-      query.course = course;
-    }
-
-    if (status) {
-      query.status = status;
-    } else {
-      // By default, only show approved papers to non-admin users
-      query.status = 'approved';
-    }
+    query.status = status || 'approved';
 
     const papers = await Paper.find(query)
       .populate('course', 'name code')
@@ -43,16 +37,9 @@ export const getAllPapers = async (req, res) => {
       .populate('uploadedBy', 'name email profileImage')
       .sort({ createdAt: -1 });
 
-    res.json({
-      success: true,
-      count: papers.length,
-      data: papers
-    });
+    res.json({ success: true, count: papers.length, data: papers });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -67,25 +54,15 @@ export const getPaper = async (req, res) => {
       .populate('uploadedBy', 'name email profileImage');
 
     if (!paper) {
-      return res.status(404).json({
-        success: false,
-        message: 'Paper not found'
-      });
+      return res.status(404).json({ success: false, message: 'Paper not found' });
     }
 
-    // Increment views
     paper.views += 1;
     await paper.save();
 
-    res.json({
-      success: true,
-      data: paper
-    });
+    res.json({ success: true, data: paper });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -94,192 +71,148 @@ export const getPaper = async (req, res) => {
 // @access  Private
 export const uploadPaper = async (req, res) => {
   try {
-    console.log('📝 Request body:', req.body);
-    console.log('📁 Request files:', req.files);
-    
-    const { name, course, branch, subject,paperCode, year, semester, uploadedBy } = req.body;
-    
+    // console.log('📝 Request body:', req.body);
+    // console.log('📁 Request files:', req.files ? Object.keys(req.files) : 'none');
+
+    const { name, course, branch, subject, paperCode, year, semester, uploadedBy } = req.body;
+
     // Validate required fields
-    if (!name || !course || !subject || !year || !semester || !uploadedBy || !branch || !paperCode) {
-      return res.status(400).json({ 
-        success: false,
-        errors: "Missing required fields" 
-      });
+    if (!name || !course || !subject || !year || !semester || !uploadedBy  || !paperCode) {
+      return res.status(400).json({ success: false, errors: 'Missing required fields' });
     }
 
-    // Check if paper code already exists
-    const exitpapercode = await Paper.findOne({ paperCode: paperCode });
-    if (exitpapercode) {
-      return res.status(400).json({ 
-        success: false,
-        errors: "Already uploaded paper with this code" 
-      });
+    // Check duplicate paper code
+    const existingPaper = await Paper.findOne({ paperCode });
+    if (existingPaper) {
+      return res.status(400).json({ success: false, errors: 'Already uploaded paper with this code' });
     }
 
-    // Check if files were uploaded
-    if (!req.files || Object.keys(req.files).length === 0) {
-      console.error('❌ No files in request');
-      return res.status(400).json({ 
-        success: false,
-        errors: "No file uploaded" 
-      });
+    // Validate front side file (required)
+    if (!req.files || !req.files.paperFile) {
+      return res.status(400).json({ success: false, errors: 'Front side file (paperFile) is required' });
     }
 
-    // Extract the paper file from req.files
     const paperFile = req.files.paperFile;
-    if (!paperFile) {
-      console.error('❌ Available fields in req.files:', Object.keys(req.files));
-      return res.status(400).json({ 
-        success: false,
-        errors: `No paperFile found. Available fields: ${Object.keys(req.files).join(', ')}` 
-      });
+    if (!paperFile.tempFilePath) {
+      return res.status(400).json({ success: false, errors: 'Invalid file path for front side' });
     }
 
-    // Get file path for cloudinary
-    const filePath = paperFile.tempFilePath;
-    if (!filePath) {
-      console.error('❌ File object:', paperFile);
-      return res.status(400).json({ 
-        success: false,
-        errors: "Invalid file path" 
-      });
-    }
-    
-    // Determine resource type based on file mime type
-    const isPDF = paperFile.mimetype === 'application/pdf';
-    
-    // Upload main paper file to cloudinary
-    const cloud_response = await cloudinary.uploader.upload(filePath, {
-      resource_type: isPDF ? 'raw' : 'auto',
-      folder: 'papers',
-      access_mode: 'public', // Ensure file is publicly accessible
-      ...(isPDF && { 
-        flags: 'attachment', // Force download for PDFs (optional)
-      })
-    });
-
-    if (!cloud_response || cloud_response.error) {
-      console.error('❌ Cloudinary error:', cloud_response.error);
-      return res.status(400).json({ 
-        success: false,
-        errors: "Error uploading file to cloudinary" 
-      });
+    // Upload front side
+    let frontCloudResponse;
+    try {
+      frontCloudResponse = await uploadToCloudinary(paperFile, 'papers/front');
+      console.log('✅ Front side uploaded:', frontCloudResponse.public_id);
+    } catch (err) {
+      console.error('❌ Front side upload failed:', err.message);
+      return res.status(500).json({ success: false, errors: 'Failed to upload front side file' });
     }
 
-    // console.log('✅ Cloudinary upload successful:', cloud_response.public_id);
-    // console.log('✅ Cloudinary URL:', cloud_response.secure_url || cloud_response.url);
-
-    // Handle solve PDF file (optional)
-    let solvePaperCloudResponse = null;
-    const solvePaperFile = req.files.solvePaperFile;
-    
-    if (solvePaperFile) {
-      console.log('📄 Solve PDF file detected:', solvePaperFile.name);
-      console.log('📄 Solve PDF mimetype:', solvePaperFile.mimetype);
-      const solvePaperFilePath = solvePaperFile.tempFilePath;
-      
-      if (!solvePaperFilePath) {
-        console.warn('⚠️ Solve PDF file has no tempFilePath');
+    // Upload back side (optional)
+    let backCloudResponse = null;
+    const backSideFile = req.files.backSideFile;
+    if (backSideFile) {
+      if (!backSideFile.tempFilePath) {
+        console.warn('⚠️ Back side file has no tempFilePath, skipping');
       } else {
         try {
-          // Upload PDF with 'raw' resource type - this is critical for PDFs
-          solvePaperCloudResponse = await cloudinary.uploader.upload(solvePaperFilePath, {
-            resource_type: 'raw', // Must be 'raw' for PDFs
-            folder: 'papers/solutions',
-            access_mode: 'public', // Ensure file is publicly accessible
-            type: 'upload', // Explicitly set upload type
-          });
-          
-          console.log('✅ Solve PDF uploaded successfully');
-          console.log('✅ Public ID:', solvePaperCloudResponse.public_id);
-          console.log('✅ Secure URL:', solvePaperCloudResponse.secure_url);
-          console.log('✅ Regular URL:', solvePaperCloudResponse.url);
-          
-        } catch (error) {
-          console.error('❌ Solve PDF upload failed:', error.message);
-          console.error('Error details:', error);
-          // Don't fail the entire request if solve pdf upload fails
+          backCloudResponse = await uploadToCloudinary(backSideFile, 'papers/back');
+          console.log('✅ Back side uploaded:', backCloudResponse.public_id);
+        } catch (err) {
+          console.warn('⚠️ Back side upload failed (non-critical):', err.message);
+          // Don't fail the entire request — back side is optional
         }
       }
     } else {
-      console.log('ℹ️ No solve PDF file provided (optional field)');
+      console.log('ℹ️ No back side file provided (optional)');
     }
 
-    // Create paper document with secure URLs
+    // Upload solve PDF (optional)
+    let solvePaperCloudResponse = null;
+    const solvePaperFile = req.files.solvePaperFile;
+    if (solvePaperFile && solvePaperFile.tempFilePath) {
+      try {
+        solvePaperCloudResponse = await cloudinary.uploader.upload(solvePaperFile.tempFilePath, {
+          resource_type: 'raw',
+          folder: 'papers/solutions',
+          access_mode: 'public',
+          type: 'upload',
+        });
+        console.log('✅ Solve PDF uploaded:', solvePaperCloudResponse.public_id);
+      } catch (err) {
+        console.warn('⚠️ Solve PDF upload failed (non-critical):', err.message);
+      }
+    }
+
+    // Build paper document
     const paperData = {
-      name: name,
-      paperCode: paperCode,
-      course: course,
+      name,
+      paperCode,
+      course,
       branch: branch || null,
-      subject: subject,
-      year: year,
-      semester: semester,
-      uploadedBy: uploadedBy,
+      subject,
+      year,
+      semester,
+      uploadedBy,
+      // Front side (required)
       paperFile: {
-        public_id: cloud_response.public_id,
-        url: cloud_response.secure_url || cloud_response.url,
+        public_id: frontCloudResponse.public_id,
+        url: frontCloudResponse.secure_url || frontCloudResponse.url,
       },
     };
 
-    // Add solve paper file if uploaded successfully
-    if (solvePaperCloudResponse && solvePaperCloudResponse.public_id) {
+    // Back side (optional)
+    if (backCloudResponse) {
+      paperData.backSideFile = {
+        public_id: backCloudResponse.public_id,
+        url: backCloudResponse.secure_url || backCloudResponse.url,
+      };
+    }
+
+    // Solve PDF (optional)
+    if (solvePaperCloudResponse) {
       paperData.solvePaperFile = {
         public_id: solvePaperCloudResponse.public_id,
         url: solvePaperCloudResponse.secure_url || solvePaperCloudResponse.url,
       };
-      console.log('✅ Solve PDF added to paper data with URL:', paperData.solvePaperFile.url);
     }
 
     const paper = await Paper.create(paperData);
 
-    // console.log('✅ Paper created successfully:', paper._id);
-    // console.log('✅ Paper data:', JSON.stringify(paperData, null, 2));
-
-    // Update user's papers uploaded count and award coins
-    if (req.user && req.user.id) {
+    // Award coins to uploader
+    if (req.user?.id) {
       try {
         const user = await User.findById(req.user.id);
         if (user) {
           user.papersUploaded += 1;
-          user.coins += 5; // Award 5 coins for uploading a paper
+          user.coins += 5;
           await user.save();
-          console.log('✅ User papers count updated');
-          console.log('✅ User awarded 5 coins for paper upload');
         }
-      } catch (error) {
-        console.error('⚠️ Failed to update user papers count:', error.message);
+      } catch (err) {
+        console.warn('⚠️ Failed to update user stats:', err.message);
       }
     }
 
-    // Update branch total papers
+    // Update branch paper count
     if (branch) {
       try {
-        const branchs = await Branch.findById(branch);
-        if (branchs) {
-          branchs.totalPapers += 1;
-          await branchs.save();
-          console.log('✅ Branch papers count updated');
+        const branchDoc = await Branch.findById(branch);
+        if (branchDoc) {
+          branchDoc.totalPapers += 1;
+          await branchDoc.save();
         }
-      } catch (error) {
-        console.error('⚠️ Failed to update branch papers count:', error.message);
+      } catch (err) {
+        console.warn('⚠️ Failed to update branch count:', err.message);
       }
     }
 
-    res.status(201).json({
-      message: "Paper uploaded successfully",
-      success: true,
-      data: paper
-    });
+    res.status(201).json({ message: 'Paper uploaded successfully', success: true, data: paper });
 
   } catch (error) {
     console.error('❌ Upload error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-      errors: error.message
-    });
+    res.status(500).json({ success: false, message: error.message, errors: error.message });
   }
 };
+
 // @desc    Update paper
 // @route   PUT /api/papers/:id
 // @access  Private
@@ -287,36 +220,17 @@ export const updatePaper = async (req, res) => {
   try {
     let paper = await Paper.findById(req.params.id);
 
-    if (!paper) {
-      return res.status(404).json({
-        success: false,
-        message: 'Paper not found'
-      });
-    }
+    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
 
-    // Check if user owns the paper or is admin
     if (paper.uploadedBy.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to update this paper'
-      });
+      return res.status(403).json({ success: false, message: 'Not authorized to update this paper' });
     }
 
-    paper = await Paper.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
+    paper = await Paper.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
 
-    res.json({
-      success: true,
-      data: paper
-    });
+    res.json({ success: true, data: paper });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -327,32 +241,25 @@ export const deletePaper = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) {
-      return res.status(404).json({
-        success: false,
-        message: 'Paper not found'
-      });
+    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
+
+    if (paper.uploadedBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized to delete this paper' });
     }
 
-    // Check if user owns the paper or is admin
-    if (paper.uploadedBy.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to delete this paper'
-      });
+    // Optionally delete from cloudinary too
+    if (paper.paperFile?.public_id) {
+      await cloudinary.uploader.destroy(paper.paperFile.public_id, { resource_type: 'raw' }).catch(() => {});
+    }
+    if (paper.backSideFile?.public_id) {
+      await cloudinary.uploader.destroy(paper.backSideFile.public_id, { resource_type: 'raw' }).catch(() => {});
     }
 
     await paper.deleteOne();
 
-    res.json({
-      success: true,
-      message: 'Paper removed'
-    });
+    res.json({ success: true, message: 'Paper removed' });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -363,30 +270,20 @@ export const approvePaper = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) {
-      return res.status(404).json({
-        success: false,
-        message: 'Paper not found'
-      });
-    }
+    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
 
     paper.status = 'approved';
     await paper.save();
 
-    // Award coins to user
     const user = await User.findById(paper.uploadedBy);
-    user.coins += 10; // 10 coins per approved paper
-    await user.save();
+    if (user) {
+      user.coins += 10;
+      await user.save();
+    }
 
-    res.json({
-      success: true,
-      data: paper
-    });
+    res.json({ success: true, data: paper });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -397,25 +294,14 @@ export const rejectPaper = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) {
-      return res.status(404).json({
-        success: false,
-        message: 'Paper not found'
-      });
-    }
+    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
 
     paper.status = 'rejected';
     await paper.save();
 
-    res.json({
-      success: true,
-      data: paper
-    });
+    res.json({ success: true, data: paper });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -426,25 +312,14 @@ export const incrementDownload = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) {
-      return res.status(404).json({
-        success: false,
-        message: 'Paper not found'
-      });
-    }
+    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
 
     paper.downloads += 1;
     await paper.save();
 
-    res.json({
-      success: true,
-      data: paper
-    });
+    res.json({ success: true, data: paper });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -458,16 +333,8 @@ export const getMyPapers = async (req, res) => {
       .populate('branch', 'name code')
       .sort({ createdAt: -1 });
 
-    res.json({
-      success: true,
-      count: papers.length,
-      data: papers
-    });
+    res.json({ success: true, count: papers.length, data: papers });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
-

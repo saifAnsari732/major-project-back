@@ -45,12 +45,13 @@ app.use(fileUpload({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'build')));
- 
+    
 // CORS middleware
 app.use(cors({
-  origin: "https://major-project-six-omega.vercel.app",
+  // origin: "https://major-project-git-main-saifs-projects-e8e089b8.vercel.app/",
+  origin: process.env.FRONTEND_URL,
   credentials: true
-}));
+}));  
 
 // console.log("Frontend URL:", process.env.FRONTEND_URL);
  

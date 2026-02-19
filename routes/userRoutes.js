@@ -13,5 +13,5 @@ router.get('/profile', protect, getUserProfile);
 router.put('/profile', protect, updateUserProfile);
 router.get('/', protect, authorize('admin'), getAllUsers);
 router.delete('/:id', protect, authorize('admin'), deleteUser);
-
+ 
 export default router;

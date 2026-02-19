@@ -17,5 +17,5 @@ router.post('/', protect, createBranch);
 router.put('/:id', protect, authorize('admin'), updateBranch);
 router.delete('/:id', protect, authorize('admin'), deleteBranch);
 router.get('/:id/papers', getPapersByBranch);
-
+ 
 export default router;
