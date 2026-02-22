@@ -183,8 +183,8 @@ export const uploadPaper = async (req, res) => {
       try {
         const user = await User.findById(req.user.id);
         if (user) {
-          user.papersUploaded += 1;
-          user.coins += 5;
+          user.papersUploaded += 1; 
+          user.coins += 2;
           await user.save();
         }
       } catch (err) {

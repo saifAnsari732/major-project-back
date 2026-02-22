@@ -15,7 +15,7 @@ const LANGUAGE_MAP = {
 
 // POST /api/compiler
 router.post('/', async (req, res) => {
-    console.log(req.body);
+
   const { code, language, input } = req.body;
 
   if (!code || !code.trim()) {

@@ -203,13 +203,19 @@ app.post("/api/gemini", async (req, res) => {
 // Compile API
 app.post("/api/compiler", async (req, res) => {
   const { code, language, input } = req.body;
-
+ console.log(req.body);
   const languageMap = {
     python: 71,
     java: 62,
-    c: 50
+    c: 50,
+    cpp: 54,
   }; 
- 
+   // ✅ Guard against unknown language
+  const languageId = languageMap[language];
+  if (!languageId) {
+    return res.status(400).json({ error: `Unsupported language: ${language}` });
+  }
+
   try {
     const response = await axios.post(
       "https://ce.judge0.com/submissions?base64_encoded=false&wait=true",
@@ -219,11 +225,13 @@ app.post("/api/compiler", async (req, res) => {
         stdin: input || ""
       }
     );
-
+  const stdout = response.data.stdout ?? "";   // ✅ null → ""
+    const stderr = response.data.stderr ?? "";   // ✅ null → ""
+    const compileOutput = response.data.compile_output ?? ""; // ✅ catch compile errors
     res.json({
-      output: response.data.stdout,
-      error: response.data.stderr,
-      status: response.data.status.description
+      output: stdout,
+      error:  compileOutput || stderr,           // ✅ compile errors show first
+      status: response.data.status?.description,
     });
 
   } catch (err) {
