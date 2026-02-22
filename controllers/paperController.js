@@ -1,16 +1,19 @@
-import Paper from '../models/Paper.js';
-import Branch from '../models/Branch.js';
-import User from '../models/User.js';
-import { v2 as cloudinary } from 'cloudinary'
+import Paper from "../models/Paper.js";
+import Branch from "../models/Branch.js";
+import User from "../models/User.js";
+import { v2 as cloudinary } from "cloudinary";
+import multer from "multer";
 
 // Helper: upload a single file to cloudinary
 const uploadToCloudinary = async (file, folder) => {
-  const isPDF = file.mimetype === 'application/pdf';
+  const isPDF = file.mimetype === "application/pdf";
   const response = await cloudinary.uploader.upload(file.tempFilePath, {
-    resource_type: isPDF ? 'raw' : 'auto',
+    resource_type: isPDF ? "raw" : "auto",
     folder,
-    access_mode: 'public',
-    ...(isPDF && { flags: 'attachment' }),
+    access_mode: "public",
+    // ✅ REMOVED: flags: 'immutable' - this is invalid for upload endpoint
+    // Use quality optimization instead
+    quality: "auto",
   });
   return response;
 };
@@ -21,20 +24,20 @@ const uploadToCloudinary = async (file, folder) => {
 export const getAllPapers = async (req, res) => {
   try {
     const { paperCode, name, branch, course, status } = req.query;
-    
+
     let query = {};
 
-    if (paperCode) query.paperCode = { $regex: paperCode, $options: 'i' };
-    if (name) query.name = { $regex: name, $options: 'i' };
+    if (paperCode) query.paperCode = { $regex: paperCode, $options: "i" };
+    if (name) query.name = { $regex: name, $options: "i" };
     if (branch) query.branch = branch;
     if (course) query.course = course;
 
-    query.status = status || 'approved';
+    query.status = status || "approved";
 
     const papers = await Paper.find(query)
-      .populate('course', 'name code')
-      .populate('branch', 'name code')
-      .populate('uploadedBy', 'name email profileImage')
+      .populate("course", "name code")
+      .populate("branch", "name code")
+      .populate("uploadedBy", "name email profileImage")
       .sort({ createdAt: -1 });
 
     res.json({ success: true, count: papers.length, data: papers });
@@ -49,12 +52,14 @@ export const getAllPapers = async (req, res) => {
 export const getPaper = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id)
-      .populate('course', 'name code')
-      .populate('branch', 'name code')
-      .populate('uploadedBy', 'name email profileImage');
+      .populate("course", "name code")
+      .populate("branch", "name code")
+      .populate("uploadedBy", "name email profileImage");
 
     if (!paper) {
-      return res.status(404).json({ success: false, message: 'Paper not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Paper not found" });
     }
 
     paper.views += 1;
@@ -71,76 +76,127 @@ export const getPaper = async (req, res) => {
 // @access  Private
 export const uploadPaper = async (req, res) => {
   try {
-    // console.log('📝 Request body:', req.body);
-    // console.log('📁 Request files:', req.files ? Object.keys(req.files) : 'none');
-
-    const { name, course, branch, subject, paperCode, year, semester, uploadedBy } = req.body;
+    const {
+      name,
+      course,
+      branch,
+      subject,
+      paperCode,
+      year,
+      semester,
+      uploadedBy,
+    } = req.body;
 
     // Validate required fields
-    if (!name || !course || !subject || !year || !semester || !uploadedBy  || !paperCode) {
-      return res.status(400).json({ success: false, errors: 'Missing required fields' });
+    if (
+      !name ||
+      !course ||
+      !subject ||
+      !year ||
+      !semester ||
+      !uploadedBy ||
+      !paperCode
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, errors: "Missing required fields" });
     }
 
     // Check duplicate paper code
     const existingPaper = await Paper.findOne({ paperCode });
     if (existingPaper) {
-      return res.status(400).json({ success: false, errors: 'Already uploaded paper with this code' });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          errors: "Already uploaded paper with this code",
+        });
     }
 
     // Validate front side file (required)
     if (!req.files || !req.files.paperFile) {
-      return res.status(400).json({ success: false, errors: 'Front side file (paperFile) is required' });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          errors: "Front side file (paperFile) is required",
+        });
     }
 
     const paperFile = req.files.paperFile;
     if (!paperFile.tempFilePath) {
-      return res.status(400).json({ success: false, errors: 'Invalid file path for front side' });
+      return res
+        .status(400)
+        .json({ success: false, errors: "Invalid file path for front side" });
     }
 
     // Upload front side
     let frontCloudResponse;
     try {
-      frontCloudResponse = await uploadToCloudinary(paperFile, 'papers/front');
-      console.log('✅ Front side uploaded:', frontCloudResponse.public_id);
+      frontCloudResponse = await uploadToCloudinary(paperFile, "papers/front");
+      console.log("✅ Front side uploaded:", frontCloudResponse.public_id);
     } catch (err) {
-      console.error('❌ Front side upload failed:', err.message);
-      return res.status(500).json({ success: false, errors: 'Failed to upload front side file' });
+      console.error("❌ Front side upload failed:", err.message);
+      return res
+        .status(500)
+        .json({ success: false, errors: "Failed to upload front side file" });
     }
 
     // Upload back side (optional)
     let backCloudResponse = null;
-    const backSideFile = req.files.backSideFile;
-    if (backSideFile) {
-      if (!backSideFile.tempFilePath) {
-        console.warn('⚠️ Back side file has no tempFilePath, skipping');
-      } else {
-        try {
-          backCloudResponse = await uploadToCloudinary(backSideFile, 'papers/back');
-          console.log('✅ Back side uploaded:', backCloudResponse.public_id);
-        } catch (err) {
-          console.warn('⚠️ Back side upload failed (non-critical):', err.message);
-          // Don't fail the entire request — back side is optional
-        }
+    const backSideFile = req.files?.backSideFile;
+    if (backSideFile && backSideFile.tempFilePath) {
+      try {
+        backCloudResponse = await uploadToCloudinary(
+          backSideFile,
+          "papers/back",
+        );
+        console.log("✅ Back side uploaded:", backCloudResponse.public_id);
+      } catch (err) {
+        console.warn("⚠️ Back side upload failed (non-critical):", err.message);
       }
     } else {
-      console.log('ℹ️ No back side file provided (optional)');
+      console.log("ℹ️ No back side file provided (optional)");
     }
 
     // Upload solve PDF (optional)
     let solvePaperCloudResponse = null;
-    const solvePaperFile = req.files.solvePaperFile;
+    const solvePaperFile = req.files?.solvePaperFile;
+
     if (solvePaperFile && solvePaperFile.tempFilePath) {
       try {
-        solvePaperCloudResponse = await cloudinary.uploader.upload(solvePaperFile.tempFilePath, {
-          resource_type: 'raw',
-          folder: 'papers/solutions',
-          access_mode: 'public',
-          type: 'upload',
-        });
-        console.log('✅ Solve PDF uploaded:', solvePaperCloudResponse.public_id);
+        console.log("📤 Starting solution file upload...");
+        console.log("   File type:", solvePaperFile.mimetype);
+        console.log("   File size:", solvePaperFile.size);
+
+        // ✅ Always use 'raw' for PDF to get correct Content-Type
+        solvePaperCloudResponse = await cloudinary.uploader.upload(
+          solvePaperFile.tempFilePath,
+          {
+             resource_type: "image",  // ✅ image use karo — browser render karega
+    format: "jpg",           // ✅ PDF → JPG convert hoga
+    folder: "papers/solutions",
+    access_mode: "public",
+    type: "upload",
+          },
+        );
+
+        console.log("✅ Solution file uploaded successfully!");
+        console.log("   Public ID:", solvePaperCloudResponse.public_id);
+        console.log(
+          "   URL:",
+          solvePaperCloudResponse.secure_url || solvePaperCloudResponse.url,
+        );
       } catch (err) {
-        console.warn('⚠️ Solve PDF upload failed (non-critical):', err.message);
+        console.error(
+          "❌ Solution file upload failed (non-critical):",
+          err.message,
+        );
+        console.error("   Error details:", err);
+        solvePaperCloudResponse = null;
       }
+    } else {
+      console.log("ℹ️ No solution file provided (optional)");
     }
 
     // Build paper document
@@ -168,27 +224,41 @@ export const uploadPaper = async (req, res) => {
       };
     }
 
-    // Solve PDF (optional)
+    // Solve PDF (optional) - Add inline display transformation
     if (solvePaperCloudResponse) {
-      paperData.solvePaperFile = {
-        public_id: solvePaperCloudResponse.public_id,
-        url: solvePaperCloudResponse.secure_url || solvePaperCloudResponse.url,
-      };
+  console.log("📝 Adding solution file to database document");
+  let solutionUrl =
+    solvePaperCloudResponse.secure_url || solvePaperCloudResponse.url;
+
+  // ✅ isSolutionPDF flag bhi save karo
+  paperData.solvePaperFile = {
+    public_id: solvePaperCloudResponse.public_id,
+    url: solutionUrl,
+    isImage: true, // ← ab ye image hai, PDF nahi
+  };
+}
+    else {
+      console.log(
+        "⚠️ Solution file not included (upload failed or not provided)",
+      );
+      paperData.solvePaperFile = null;
     }
 
+    console.log("💾 Creating paper in database...");
     const paper = await Paper.create(paperData);
+    console.log("✅ Paper created successfully:", paper._id);
 
     // Award coins to uploader
     if (req.user?.id) {
       try {
         const user = await User.findById(req.user.id);
         if (user) {
-          user.papersUploaded += 1; 
+          user.papersUploaded += 1;
           user.coins += 2;
           await user.save();
         }
       } catch (err) {
-        console.warn('⚠️ Failed to update user stats:', err.message);
+        console.warn("⚠️ Failed to update user stats:", err.message);
       }
     }
 
@@ -201,35 +271,142 @@ export const uploadPaper = async (req, res) => {
           await branchDoc.save();
         }
       } catch (err) {
-        console.warn('⚠️ Failed to update branch count:', err.message);
+        console.warn("⚠️ Failed to update branch count:", err.message);
       }
     }
 
-    res.status(201).json({ message: 'Paper uploaded successfully', success: true, data: paper });
-
+    res.status(201).json({
+      message: "Paper uploaded successfully",
+      success: true,
+      data: paper,
+      solutionIncluded: !!solvePaperCloudResponse,
+    });
   } catch (error) {
-    console.error('❌ Upload error:', error);
-    res.status(500).json({ success: false, message: error.message, errors: error.message });
+    console.error("❌ Upload error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: error.message, errors: error.message });
   }
 };
 
 // @desc    Update paper
 // @route   PUT /api/papers/:id
 // @access  Private
+// @desc    Update paper
+// @route   PUT /api/papers/:id
+// @access  Private/Admin
 export const updatePaper = async (req, res) => {
   try {
     let paper = await Paper.findById(req.params.id);
 
-    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
+    if (!paper)
+      return res.status(404).json({ success: false, message: "Paper not found" });
 
-    if (paper.uploadedBy.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Not authorized to update this paper' });
+    if (
+      paper.uploadedBy.toString() !== req.user.id &&
+      req.user.role !== "admin"
+    ) {
+      return res.status(403).json({ success: false, message: "Not authorized to update this paper" });
     }
 
-    paper = await Paper.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    // Extract text fields from body
+    const { name, paperCode, course, branch, subject, year, semester, status } = req.body;
+
+    const updateData = {};
+    if (name)       updateData.name = name;
+    if (paperCode)  updateData.paperCode = paperCode;
+    if (course)     updateData.course = course;
+    if (branch)     updateData.branch = branch;
+    if (subject)    updateData.subject = subject;
+    if (year)       updateData.year = year;
+    if (semester)   updateData.semester = semester;
+    if (status)     updateData.status = status;
+
+    // ── Handle file updates if any files uploaded ──────────────────────────
+
+    // Front Side (paperFile)
+    if (req.files?.paperFile) {
+      try {
+        // Delete old file from Cloudinary
+        if (paper.paperFile?.public_id) {
+          await cloudinary.uploader.destroy(paper.paperFile.public_id, {
+            resource_type: paper.paperFile.url?.includes('.pdf') ? 'raw' : 'image',
+          }).catch(() => {});
+        }
+        // Upload new file
+        const frontRes = await uploadToCloudinary(req.files.paperFile, 'papers/front');
+        updateData.paperFile = {
+          public_id: frontRes.public_id,
+          url: frontRes.secure_url || frontRes.url,
+        };
+        console.log('✅ Front side updated:', frontRes.public_id);
+      } catch (err) {
+        console.error('❌ Front side update failed:', err.message);
+      }
+    }
+
+    // Back Side (backSideFile)
+    if (req.files?.backSideFile) {
+      try {
+        if (paper.backSideFile?.public_id) {
+          await cloudinary.uploader.destroy(paper.backSideFile.public_id, {
+            resource_type: paper.backSideFile.url?.includes('.pdf') ? 'raw' : 'image',
+          }).catch(() => {});
+        }
+        const backRes = await uploadToCloudinary(req.files.backSideFile, 'papers/back');
+        updateData.backSideFile = {
+          public_id: backRes.public_id,
+          url: backRes.secure_url || backRes.url,
+        };
+        console.log('✅ Back side updated:', backRes.public_id);
+      } catch (err) {
+        console.error('❌ Back side update failed:', err.message);
+      }
+    }
+
+    // Solution File (solvePaperFile)
+    if (req.files?.solvePaperFile) {
+      try {
+        if (paper.solvePaperFile?.public_id) {
+          await cloudinary.uploader.destroy(paper.solvePaperFile.public_id, {
+            resource_type: 'image',
+          }).catch(() => {});
+        }
+        // Upload as image (PDF → JPG conversion)
+        const solveRes = await cloudinary.uploader.upload(
+          req.files.solvePaperFile.tempFilePath,
+          {
+            resource_type: 'image',
+            format: 'jpg',
+            folder: 'papers/solutions',
+            access_mode: 'public',
+            type: 'upload',
+             public_id: `solution_${req.params.id}_${Date.now()}`, // ✅ Unique ID — cache bust
+             invalidate: true, // ✅ Cloudinary CDN cache clear kar
+          }
+        );
+        updateData.solvePaperFile = {
+          public_id: solveRes.public_id,
+          url: solveRes.secure_url || solveRes.url,
+          isImage: true,
+        };
+        console.log('✅ Solution file updated:', solveRes.public_id);
+      } catch (err) {
+        console.error('❌ Solution file update failed:', err.message);
+      }
+    }
+
+    // ── Save to DB ─────────────────────────────────────────────────────────
+    paper = await Paper.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    );
 
     res.json({ success: true, data: paper });
+
   } catch (error) {
+    console.error('❌ Update error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -241,23 +418,52 @@ export const deletePaper = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
+    if (!paper)
+      return res
+        .status(404)
+        .json({ success: false, message: "Paper not found" });
 
-    if (paper.uploadedBy.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Not authorized to delete this paper' });
+    if (
+      paper.uploadedBy.toString() !== req.user.id &&
+      req.user.role !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "Not authorized to delete this paper",
+        });
     }
 
-    // Optionally delete from cloudinary too
+    // Delete files from cloudinary
     if (paper.paperFile?.public_id) {
-      await cloudinary.uploader.destroy(paper.paperFile.public_id, { resource_type: 'raw' }).catch(() => {});
+      const isPDF = paper.paperFile.url?.includes(".pdf");
+      await cloudinary.uploader
+        .destroy(paper.paperFile.public_id, {
+          resource_type: isPDF ? "raw" : "auto",
+        })
+        .catch(() => {});
     }
     if (paper.backSideFile?.public_id) {
-      await cloudinary.uploader.destroy(paper.backSideFile.public_id, { resource_type: 'raw' }).catch(() => {});
+      const isPDF = paper.backSideFile.url?.includes(".pdf");
+      await cloudinary.uploader
+        .destroy(paper.backSideFile.public_id, {
+          resource_type: isPDF ? "raw" : "auto",
+        })
+        .catch(() => {});
+    }
+    if (paper.solvePaperFile?.public_id) {
+      const isPDF = paper.solvePaperFile.url?.includes(".pdf");
+      await cloudinary.uploader
+        .destroy(paper.solvePaperFile.public_id, {
+          resource_type: isPDF ? "raw" : "auto",
+        })
+        .catch(() => {});
     }
 
     await paper.deleteOne();
 
-    res.json({ success: true, message: 'Paper removed' });
+    res.json({ success: true, message: "Paper removed" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -270,9 +476,12 @@ export const approvePaper = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
+    if (!paper)
+      return res
+        .status(404)
+        .json({ success: false, message: "Paper not found" });
 
-    paper.status = 'approved';
+    paper.status = "approved";
     await paper.save();
 
     const user = await User.findById(paper.uploadedBy);
@@ -294,9 +503,12 @@ export const rejectPaper = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
+    if (!paper)
+      return res
+        .status(404)
+        .json({ success: false, message: "Paper not found" });
 
-    paper.status = 'rejected';
+    paper.status = "rejected";
     await paper.save();
 
     res.json({ success: true, data: paper });
@@ -312,7 +524,10 @@ export const incrementDownload = async (req, res) => {
   try {
     const paper = await Paper.findById(req.params.id);
 
-    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
+    if (!paper)
+      return res
+        .status(404)
+        .json({ success: false, message: "Paper not found" });
 
     paper.downloads += 1;
     await paper.save();
@@ -329,8 +544,8 @@ export const incrementDownload = async (req, res) => {
 export const getMyPapers = async (req, res) => {
   try {
     const papers = await Paper.find({ uploadedBy: req.user.id })
-      .populate('course', 'name code')
-      .populate('branch', 'name code')
+      .populate("course", "name code")
+      .populate("branch", "name code")
       .sort({ createdAt: -1 });
 
     res.json({ success: true, count: papers.length, data: papers });

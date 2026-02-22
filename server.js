@@ -13,6 +13,7 @@ import axios from 'axios'
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import jwt from 'jsonwebtoken';
+import multer from 'multer'; //1
 // Route imports 
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
@@ -31,6 +32,9 @@ connectDB();
 
 const app = express();
  
+// Multer setup
+const upload = multer({ dest: "uploads/" });
+
 // Fix __dirname in ES module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

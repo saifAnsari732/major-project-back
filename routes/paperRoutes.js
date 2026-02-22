@@ -18,7 +18,6 @@ router.get('/', getAllPapers);
 router.get('/my-papers', protect, getMyPapers);
 router.get('/:id', getPaper);
 router.post('/', uploadPaper);
-// router.post('/solve', solvepaper);
 router.put('/:id', protect, updatePaper);
 router.delete('/:id', protect, deletePaper);
 router.put('/:id/approve', protect, authorize('admin'), approvePaper);

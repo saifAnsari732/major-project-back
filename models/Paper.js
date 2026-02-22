@@ -45,6 +45,10 @@ const paperSchema = new mongoose.Schema(
       public_id: { type: String },
       url: { type: String },
     },
+      solvePaperFile: {
+      public_id: { type: String,default: null },
+      url: { type: String,default: null },
+    },
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
