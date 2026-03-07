@@ -325,20 +325,28 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle new message
+
  // Handle new message — ✅ FIX: includes replyTo in socket handler
   socket.on('sendMessage', async (data) => {
     const {
-      conversationId,
+      conversationId: rawConversationId,
       recipientId,
       message,
       messageType = 'text',
       fileUrl,
       fileName,
-      replyTo = null   // ✅ FIX: was missing, caused replyTo to never persist via socket
+      replyTo = null
     } = data;
 
-    console.log(`💬 [BACKEND] Message from ${socket.userId} to ${recipientId}: ${message.substring(0, 50)}`);
+    // ✅ THE FIX: Always sort conversationId — same as chatController.js REST API
+    // Frontend might send "A-B", REST API stores "B-A" → rooms never matched
+    const conversationId = rawConversationId
+      .split('-')
+      .sort()
+      .join('-');
+
+    console.log(`💬 [BACKEND] Message from ${socket.userId} to ${recipientId}`);
+    console.log(`📌 raw conversationId: ${rawConversationId} → sorted: ${conversationId}`);
 
     try {
       const Chat = await import('./models/Chat.js').then(m => m.default);
@@ -353,9 +361,8 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // ✅ FIX: Build chatData with optional replyTo
       const chatData = {
-        conversationId,
+        conversationId,  // ✅ sorted
         senderId: socket.userId,
         senderName: sender.name,
         senderImage: sender.profileImage,
@@ -380,12 +387,11 @@ io.on('connection', (socket) => {
       await newMessage.save();
       console.log(`💾 [BACKEND] Message saved: ${newMessage._id}`);
 
-      // Create or update conversation
       let conversation = await Conversation.findOne({ conversationId });
 
       if (!conversation) {
         conversation = new Conversation({
-          conversationId,
+          conversationId,  // ✅ sorted
           participants: [
             { userId: socket.userId, name: sender.name, profileImage: sender.profileImage },
             { userId: recipientId, name: recipient.name, profileImage: recipient.profileImage }
@@ -394,22 +400,20 @@ io.on('connection', (socket) => {
           unreadCount: new Map([[recipientId, 1]]),
           isActive: true
         });
-        console.log(`📝 [BACKEND] New conversation created: ${conversationId}`);
       } else {
         conversation.lastMessage = { content: message, senderId: socket.userId, timestamp: new Date() };
         const currentUnread = conversation.unreadCount.get(recipientId) || 0;
         conversation.unreadCount.set(recipientId, currentUnread + 1);
         conversation.updatedAt = new Date();
         conversation.isActive = true;
-        console.log(`✏️ [BACKEND] Conversation updated: ${conversationId}`);
       }
 
       await conversation.save();
 
-      // ✅ Emit to both users in the conversation room (includes replyTo for UI)
+      // ✅ Emit to sorted conversationId room — matches what frontend joined
       io.to(conversationId).emit('messageReceived', {
         _id: newMessage._id,
-        conversationId,
+        conversationId,  // ✅ sorted — frontend comparison will match
         senderId: socket.userId,
         senderName: sender.name,
         senderImage: sender.profileImage,
@@ -418,13 +422,13 @@ io.on('connection', (socket) => {
         messageType,
         fileUrl,
         fileName,
-        replyTo: newMessage.replyTo || null,  // ✅ FIX: pass replyTo back to clients
+        replyTo: newMessage.replyTo || null,
         timestamp: newMessage.timestamp,
         isRead: false
       });
-      console.log(`✅ [BACKEND] Message emitted to room: ${conversationId}`);
+      console.log(`✅ [BACKEND] Emitted to room: ${conversationId}`);
 
-      // Notification to recipient if they're online
+      // Notification to recipient
       const recipientSocketId = userSocketMap.get(recipientId);
       if (recipientSocketId) {
         io.to(recipientSocketId).emit('newMessageNotification', {
@@ -435,14 +439,10 @@ io.on('connection', (socket) => {
           message: message.substring(0, 50),
           timestamp: new Date()
         });
-        console.log(`🔔 [BACKEND] Notification sent to: ${recipientId}`);
       }
     } catch (error) {
       console.error('❌ [BACKEND] Error saving message:', error);
-      socket.emit('messageError', {
-        error: 'Failed to save message',
-        details: error.message
-      });
+      socket.emit('messageError', { error: 'Failed to save message', details: error.message });
     }
   });
   // Handle typing indicator

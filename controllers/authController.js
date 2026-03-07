@@ -12,7 +12,7 @@ const generateToken = (id) => {
 // @route   POST /api/auth/register
 // @access  Public
 export const register = async (req, res) => {
-  console.log(req.body);
+  // console.log(req.body);
   try {
     const { name, email, password, role } = req.body;
 
