@@ -248,32 +248,53 @@ export const uploadPaper = async (req, res) => {
     const paper = await Paper.create(paperData);
     console.log("✅ Paper created successfully:", paper._id);
 
-    // Award coins to uploader
-    if (req.user?.id) {
-      try {
-        const user = await User.findById(req.user.id);
-        if (user) {
-          user.papersUploaded += 1;
-          user.coins += 2;
-          await user.save();
-        }
-      } catch (err) {
-        console.warn("⚠️ Failed to update user stats:", err.message);
-      }
-    }
+ // ✅ FIX: Award coins to uploader - Use uploadedBy field instead of req.user
+try {
+  console.log("💰 Updating user stats for:", uploadedBy);
+  
+  // Use uploadedBy from req.body (which should contain the user's ID)
+  const user = await User.findById(uploadedBy);
+  
+  if (user) {
+    console.log("📊 Current user stats:", {
+      papersUploaded: user.papersUploaded,
+      coins: user.coins
+    });
+    
+    user.papersUploaded = (user.papersUploaded || 0) + 1;
+    user.coins = (user.coins || 0) + 5;
+    
+    await user.save();
+    
+    console.log("✅ User stats updated:", {
+      papersUploaded: user.papersUploaded,
+      coins: user.coins
+    });
+  } else {
+    console.warn("⚠️ User not found with ID:", uploadedBy);
+  }
+} catch (err) {
+  console.error("❌ Failed to update user stats:", err.message);
+  console.error("   Stack:", err.stack);
+  // Don't fail the entire request if user update fails
+}
 
-    // Update branch paper count
-    if (branch) {
-      try {
-        const branchDoc = await Branch.findById(branch);
-        if (branchDoc) {
-          branchDoc.totalPapers += 1;
-          await branchDoc.save();
-        }
-      } catch (err) {
-        console.warn("⚠️ Failed to update branch count:", err.message);
-      }
+// Update branch paper count
+if (branch) {
+  try {
+    console.log("📚 Updating branch paper count for:", branch);
+    const branchDoc = await Branch.findById(branch);
+    if (branchDoc) {
+      branchDoc.totalPapers = (branchDoc.totalPapers || 0) + 1;
+      await branchDoc.save();
+      console.log("✅ Branch paper count updated:", branchDoc.totalPapers);
+    } else {
+      console.warn("⚠️ Branch not found with ID:", branch);
     }
+  } catch (err) {
+    console.error("❌ Failed to update branch count:", err.message);
+  }
+}
 
     res.status(201).json({
       message: "Paper uploaded successfully",
@@ -486,7 +507,7 @@ export const approvePaper = async (req, res) => {
 
     const user = await User.findById(paper.uploadedBy);
     if (user) {
-      user.coins += 10;
+      user.coins +=5;
       await user.save();
     }
 
